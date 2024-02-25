@@ -1,37 +1,108 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
-#include <time.h>
+#include <pthread.h>
 #include <omp.h>
 
-using namespace std::chrono;
 using namespace std;
+using namespace std::chrono;
 
-void randomVector(int vector[], int size) {
-  for (int i = 0; i < size; i++) {
-    vector[i] = rand() % 100;
-  }
+// Structure for passing data to pthread function
+struct TaskData {
+    int* data1;
+    int* data2;
+    int* result;
+    int size;
+    int index;
+    int thread_count;
+};
+
+// Function to populate an array with random numbers
+void fillArray(int array[], int size) {
+    for (int i = 0; i < size; i++) {
+        array[i] = rand() % 100;
+    }
+}
+
+// Function executed by each pthread for array addition
+void* performArrayAddition(void* arg) {
+    struct TaskData* task_data = (struct TaskData*)arg;
+    int size = task_data->size;
+    int* data1 = task_data->data1;
+    int* data2 = task_data->data2;
+    int* result = task_data->result;
+    int index = task_data->index;
+    int thread_count = task_data->thread_count;
+
+    // Perform array addition for the assigned portion
+    for (int i = index; i < size; i += thread_count) {
+        result[i] = data1[i] + data2[i];
+    }
+
+    pthread_exit(NULL);
 }
 
 int main() {
-  unsigned long size = 100000000;
-  srand(time(0));
-  int *v1, *v2, *v3;
-  auto start = high_resolution_clock::now();
-  v1 = (int *)malloc(size * sizeof(int));
-  v2 = (int *)malloc(size * sizeof(int));
-  v3 = (int *)malloc(size * sizeof(int));
-  randomVector(v1, size);
-  randomVector(v2, size);
+    unsigned long array_size = 100000000;
+    srand(time(0));
 
-  #pragma omp parallel for
-  for (int i = 0; i < size; i++) {
-    v3[i] = v1[i] + v2[i];
-  }
+    // Allocate memory for arrays
+    int* arr1 = new int[array_size];
+    int* arr2 = new int[array_size];
+    int* result_arr = new int[array_size];
 
-  auto stop = high_resolution_clock::now();
-  auto duration = duration_cast<microseconds>(stop - start);
-  cout << "Time taken by function :" << duration.count() << " microseconds"
-       << endl;
-  return 0;
+    // Populate arrays with random numbers
+    fillArray(arr1, array_size);
+    fillArray(arr2, array_size);
+
+    // Sequential Execution
+    auto start_time_seq = high_resolution_clock::now();
+    for (int i = 0; i < array_size; i++) {
+        result_arr[i] = arr1[i] + arr2[i];
+    }
+    auto stop_time_seq = high_resolution_clock::now();
+    auto duration_seq = duration_cast<microseconds>(stop_time_seq - start_time_seq);
+    cout << "Sequential Execution Time: " << duration_seq.count() << " microseconds" << endl;
+
+    // OpenMP Execution
+    auto start_time_omp = high_resolution_clock::now();
+#pragma omp parallel for
+    for (int i = 0; i < array_size; i++) {
+        result_arr[i] = arr1[i] + arr2[i];
+    }
+    auto stop_time_omp = high_resolution_clock::now();
+    auto duration_omp = duration_cast<microseconds>(stop_time_omp - start_time_omp);
+    cout << "OpenMP Execution Time: " << duration_omp.count() << " microseconds" << endl;
+
+    // Pthread Execution
+    int num_threads = 4; // Adjust the number of threads as needed
+    pthread_t threads[num_threads];
+    struct TaskData thread_data[num_threads];
+    auto start_time_pthread = high_resolution_clock::now();
+
+    // Create pthreads
+    for (int i = 0; i < num_threads; ++i) {
+        thread_data[i].data1 = arr1;
+        thread_data[i].data2 = arr2;
+        thread_data[i].result = result_arr;
+        thread_data[i].size = array_size;
+        thread_data[i].index = i;
+        thread_data[i].thread_count = num_threads;
+        pthread_create(&threads[i], NULL, performArrayAddition, (void*)&thread_data[i]);
+    }
+
+    // Wait for pthreads to finish
+    for (int i = 0; i < num_threads; ++i) {
+        pthread_join(threads[i], NULL);
+    }
+    auto stop_time_pthread = high_resolution_clock::now();
+    auto duration_pthread = duration_cast<microseconds>(stop_time_pthread - start_time_pthread);
+    cout << "Pthread Execution Time: " << duration_pthread.count() << " microseconds" << endl;
+
+    // Free allocated memory
+    delete[] arr1;
+    delete[] arr2;
+    delete[] result_arr;
+
+    return 0;
 }
